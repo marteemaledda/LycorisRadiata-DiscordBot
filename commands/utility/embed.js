@@ -54,39 +54,46 @@ async function execute(interaction){
     const embedDoc = createDefaultEmbedData(guildId, name);
     await embedsCollection.insertOne(embedDoc);
     
-    // row for buttons 
+    // row for buttons (all non-field options; URL-based image/icon controls included)
+    const encodedName = encodeURIComponent(name);
     const row = new ActionRowBuilder() // max 5 buttons per row
     .addComponents(
-        // BUTTON CREATION
         new ButtonBuilder()
-            .setCustomId(`embed:title:${name}`)
-            .setLabel('Title')
+            .setCustomId(`embed:title:${encodedName}`)
+            .setLabel('Title & URL')
             .setStyle(ButtonStyle.Secondary),
-
         new ButtonBuilder()
-            .setCustomId(`embed:description:${name}`)
+            .setCustomId(`embed:description:${encodedName}`)
             .setLabel('Description')
             .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
-            .setCustomId(`embed:color:${name}`)
-            .setLabel('Color')
+            .setCustomId(`embed:author:${encodedName}`)
+            .setLabel('Author')
             .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
-            .setCustomId(`embed:footer:${name}`)
+            .setCustomId(`embed:footer:${encodedName}`)
             .setLabel('Footer')
             .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
-            .setCustomId(`embed:thumbnail:${name}`)
-            .setLabel('Thumbnail')
+            .setCustomId(`embed:color:${encodedName}`)
+            .setLabel('Color')
             .setStyle(ButtonStyle.Secondary),
     );
 
     const row2 = new ActionRowBuilder()
     .addComponents(
-         new ButtonBuilder()
-            .setCustomId(`embed:image:${name}`)
-            .setLabel('Image')
-            .setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder()
+            .setCustomId(`embed:thumbnail:${encodedName}`)
+            .setLabel('Thumbnail URL')
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId(`embed:image:${encodedName}`)
+            .setLabel('Image URL')
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId(`embed:timestamp:${encodedName}`)
+            .setLabel('Timestamp')
+            .setStyle(ButtonStyle.Secondary),
     );
 
     // builds base embed 
