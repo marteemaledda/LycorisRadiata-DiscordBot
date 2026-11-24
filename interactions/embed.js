@@ -254,6 +254,34 @@ async function getEmbedDoc(guildId, name) {
     return getDb().collection('embeds').findOne({ guildId, name });
 }
 
+export async function deleteStoredEmbed(guild, name) {
+    const guildId = guild?.id;
+    if (!guildId) throw new Error('Embed deletion must be done in a server.');
+
+    return withEmbedLock(`${guildId}:${name}`, async () => {
+        const collection = getDb().collection('embeds');
+        const embed = await collection.findOne({ guildId, name });
+        if (!embed) {
+            return { found: false };
+        }
+
+        if (embed.previewChannelId && embed.previewMessageId) {
+            try {
+                const channel = await guild.channels.fetch(embed.previewChannelId);
+                if (channel && 'messages' in channel) {
+                    const message = await channel.messages.fetch(embed.previewMessageId);
+                    await message.delete();
+                }
+            } catch {
+                // Ignore if the preview channel/message is missing or cannot be deleted.
+            }
+        }
+
+        await collection.deleteOne({ _id: embed._id });
+        return { found: true };
+    });
+}
+
 function buildFieldSelectMenu(name, action, fields) {
     const encodedName = encodeURIComponent(name);
     const placeholder = action === 'field_edit_select' ? 'Select a field to edit' : 'Select a field to remove';
@@ -371,13 +399,60 @@ export async function handleEmbedSelectMenu(interaction) {
     const [system, action, ...rest] = interaction.customId.split(':');
     if (system !== 'embed') return false;
 
-    const rawName = rest.join(':');
-    const name = decodeName(rawName);
-    const selectedIndex = parseInt(interaction.values?.[0] ?? '', 10);
-
-    if (!Number.isInteger(selectedIndex) || selectedIndex < 0) return false;
-
     try {
+        if (action === 'delete_select') {
+            const selectedName = interaction.values?.[0];
+            if (!selectedName) {
+                await interaction.update({ content: 'No embed selected.', components: [] });
+                return true;
+            }
+
+            await interaction.deferUpdate();
+            const result = await deleteStoredEmbed(interaction.guild, selectedName);
+            const guildId = interaction.guild?.id;
+
+            let remaining = [];
+            if (guildId) {
+                remaining = await getDb().collection('embeds').find(
+                    { guildId },
+                    { projection: { name: 1 } }
+                ).sort({ name: 1 }).limit(25).toArray();
+            }
+
+            if (!result.found) {
+                const content = `Embed "${selectedName}" was not found in this server.${remaining.length ? ' Select another embed to delete:' : ' No saved embeds left in this server.'}`;
+                const components = remaining.length ? [new ActionRowBuilder().addComponents(
+                    new StringSelectMenuBuilder()
+                        .setCustomId('embed:delete_select')
+                        .setPlaceholder('Select an embed to delete')
+                        .addOptions(remaining.map((e) => ({
+                            label: String(e.name ?? '').slice(0, 100) || '(unnamed)',
+                            value: String(e.name ?? '').slice(0, 100),
+                        })))
+                )] : [];
+                await interaction.editReply({ content, components });
+                return true;
+            }
+
+            const content = `Deleted embed **${selectedName}** from this server.${remaining.length ? ' Select another embed to delete:' : ' No saved embeds left in this server.'}`;
+            const components = remaining.length ? [new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId('embed:delete_select')
+                    .setPlaceholder('Select an embed to delete')
+                    .addOptions(remaining.map((e) => ({
+                        label: String(e.name ?? '').slice(0, 100) || '(unnamed)',
+                        value: String(e.name ?? '').slice(0, 100),
+                    })))
+            )] : [];
+            await interaction.editReply({ content, components });
+            return true;
+        }
+
+        const rawName = rest.join(':');
+        const name = decodeName(rawName);
+        const selectedIndex = parseInt(interaction.values?.[0] ?? '', 10);
+        if (!Number.isInteger(selectedIndex) || selectedIndex < 0) return false;
+
         if (action === 'field_remove_select') {
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             await updateEmbed(interaction, 'field_remove', name, { field_index: String(selectedIndex) });
