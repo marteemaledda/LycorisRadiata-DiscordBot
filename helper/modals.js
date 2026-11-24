@@ -1,5 +1,6 @@
 // function for modal creation for embed creator 
 import {
+    FileUploadBuilder,
     LabelBuilder,
     ModalBuilder,
     TextInputBuilder,
@@ -76,6 +77,7 @@ const modalActions = {
                 validate: (v) => v.trim() === '' || isValidHttpUrl(v),
                 invalidMessage: 'Author icon URL must be a valid http(s) URL.',
             },
+            { id: 'author_icon_file', label: 'Author Icon File (optional)', kind: 'file', required: false },
         ],
     },
     footer: {
@@ -93,6 +95,7 @@ const modalActions = {
                 validate: (v) => v.trim() === '' || isValidHttpUrl(v),
                 invalidMessage: 'Footer icon URL must be a valid http(s) URL.',
             },
+            { id: 'footer_icon_file', label: 'Footer Icon File (optional)', kind: 'file', required: false },
         ],
     },
     color: {
@@ -113,12 +116,12 @@ const modalActions = {
         ],
     },
     thumbnail: {
-        title: 'Edit Thumbnail URL',
+        title: 'Edit Thumbnail',
         customId: (name) => `embed_modal:thumbnail:${encodeURIComponent(name)}`,
         inputs: [
             {
                 id: 'thumbnail',
-                label: 'Thumbnail URL',
+                label: 'Thumbnail URL (optional)',
                 style: TextInputStyle.Short,
                 required: false,
                 maxLength: 2048,
@@ -126,15 +129,16 @@ const modalActions = {
                 validate: (v) => v.trim() === '' || isValidHttpUrl(v),
                 invalidMessage: 'Thumbnail URL must be a valid http(s) URL.',
             },
+            { id: 'thumbnail_file', label: 'Thumbnail File (optional)', kind: 'file', required: false },
         ],
     },
     image: {
-        title: 'Edit Image URL',
+        title: 'Edit Image',
         customId: (name) => `embed_modal:image:${encodeURIComponent(name)}`,
         inputs: [
             {
                 id: 'image',
-                label: 'Main Image URL',
+                label: 'Main Image URL (optional)',
                 style: TextInputStyle.Short,
                 required: false,
                 maxLength: 2048,
@@ -142,6 +146,7 @@ const modalActions = {
                 validate: (v) => v.trim() === '' || isValidHttpUrl(v),
                 invalidMessage: 'Image URL must be a valid http(s) URL.',
             },
+            { id: 'image_file', label: 'Main Image File (optional)', kind: 'file', required: false },
         ],
     },
     timestamp: {
@@ -228,6 +233,17 @@ async function modalBuild(interaction, type, name, { initialValues = {}, customI
         .setTitle(config.title);
 
     for (const def of config.inputs) {
+        if (def.kind === 'file') {
+            const fileInput = new FileUploadBuilder()
+                .setCustomId(def.id)
+                .setRequired(Boolean(def.required))
+                .setMinValues(def.required ? 1 : 0)
+                .setMaxValues(1);
+
+            modal.addLabelComponents(new LabelBuilder({ label: def.label, component: fileInput }));
+            continue;
+        }
+
         const input = new TextInputBuilder()
             .setCustomId(def.id)
             .setStyle(def.style)

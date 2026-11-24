@@ -80,15 +80,40 @@ function collectModalValues(action, interaction) {
     if (!config) return { values, errors: ['Unknown embed action.'] };
 
     for (const def of config.inputs) {
+        if (def.kind === 'file') {
+            let files = null;
+            try { files = interaction.fields.getUploadedFiles(def.id, false); } catch { files = null; }
+            const first = files && typeof files.values === 'function' ? files.values().next().value : null;
+            values[def.id] = first?.url || first?.proxyURL || '';
+            continue;
+        }
+
         let raw = '';
         try { raw = interaction.fields.getTextInputValue(def.id) ?? ''; } catch { raw = ''; }
         let value = raw;
         if (def.normalize) value = def.normalize(value);
-        if (def.validate && !def.validate(value)) {
-            errors.push(def.invalidMessage || `Invalid value for ${def.label}.`);
-        }
         values[def.id] = value;
     }
+
+    // Prefer uploaded files over URL text inputs for image/icon fields.
+    const fileUrlMappings = [
+        ['image_file', 'image'],
+        ['thumbnail_file', 'thumbnail'],
+        ['author_icon_file', 'author_icon'],
+        ['footer_icon_file', 'footer_icon'],
+    ];
+    for (const [fileId, urlId] of fileUrlMappings) {
+        if (values[fileId]) values[urlId] = values[fileId];
+    }
+
+    // Run per-input validation after file-vs-URL resolution.
+    for (const def of config.inputs) {
+        if (def.kind === 'file') continue;
+        if (def.validate && !def.validate(values[def.id])) {
+            errors.push(def.invalidMessage || `Invalid value for ${def.label}.`);
+        }
+    }
+
     return { values, errors };
 }
 

@@ -84,11 +84,11 @@ async function execute(interaction){
     .addComponents(
         new ButtonBuilder()
             .setCustomId(`embed:thumbnail:${encodedName}`)
-            .setLabel('Thumbnail URL')
+            .setLabel('Thumbnail')
             .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
             .setCustomId(`embed:image:${encodedName}`)
-            .setLabel('Image URL')
+            .setLabel('Image')
             .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
             .setCustomId(`embed:timestamp:${encodedName}`)
