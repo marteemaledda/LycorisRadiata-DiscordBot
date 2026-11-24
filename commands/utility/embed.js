@@ -94,6 +94,10 @@ async function execute(interaction){
             .setCustomId(`embed:timestamp:${encodedName}`)
             .setLabel('Timestamp')
             .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId(`embed:fields:${encodedName}`)
+            .setLabel('Fields')
+            .setStyle(ButtonStyle.Secondary),
     );
 
     // builds base embed 

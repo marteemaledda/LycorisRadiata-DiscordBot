@@ -1,6 +1,6 @@
-import { MessageFlags } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, StringSelectMenuBuilder } from 'discord.js';
 import { getDb } from '../helper/db.js';
-import { createPreview, normalizeEmbedData, validateEmbedData } from '../helper/embeds.js';
+import { createPreview, normalizeEmbedData, validateEmbedData, LIMITS } from '../helper/embeds.js';
 import { modalBuild, modalActions, parseModalCustomId } from '../helper/modals.js';
 
 // Keep edits to the same embed in order so overlapping submissions don't overwrite each other's previews.
@@ -31,6 +31,21 @@ function trimOrNull(value) {
     if (value == null) return null;
     const t = String(value).trim();
     return t === '' ? null : t;
+}
+
+function parseInline(value) {
+    const v = String(value ?? '').trim().toLowerCase();
+    return v === 'yes' || v === 'y' || v === 'true' || v === '1' || v === 'inline';
+}
+
+function formatFieldValue(value) {
+    const s = String(value ?? '');
+    return s.length > 80 ? `${s.slice(0, 77)}...` : s;
+}
+
+function truncate(value, max) {
+    const s = String(value ?? '');
+    return s.length > max ? `${s.slice(0, max - 3)}...` : s;
 }
 
 function stripMongoId(doc) {
@@ -123,6 +138,31 @@ function applyActionToEmbed(previousEmbed, action, values) {
         doc.image = url ? { url } : null;
     } else if (action === 'timestamp') {
         doc.timestamp = trimOrNull(values.timestamp);
+    } else if (action === 'field_add') {
+        if (doc.fields.length >= LIMITS.fields) {
+            throw new Error(`Cannot add more than ${LIMITS.fields} fields.`);
+        }
+        const name = String(values.field_name ?? '').trim();
+        const value = String(values.field_value ?? '').trim();
+        if (!name || !value) throw new Error('Field name and value are required.');
+        doc.fields.push({ name, value, inline: parseInline(values.field_inline) });
+    } else if (action === 'field_edit') {
+        const idx = parseInt(String(values.field_index ?? '').trim(), 10);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= doc.fields.length) {
+            throw new Error(`Select a valid field to edit.`);
+        }
+        const name = String(values.field_name ?? '').trim();
+        const value = String(values.field_value ?? '').trim();
+        if (!name || !value) throw new Error('Field name and value are required.');
+        doc.fields[idx] = { name, value, inline: parseInline(values.field_inline) };
+    } else if (action === 'field_remove') {
+        const idx = parseInt(String(values.field_index ?? '').trim(), 10);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= doc.fields.length) {
+            throw new Error(`Select a valid field to remove.`);
+        }
+        doc.fields.splice(idx, 1);
+    } else if (action === 'field_clear') {
+        doc.fields = [];
     } else {
         throw new Error('Unknown embed action.');
     }
@@ -185,6 +225,43 @@ async function updateEmbed(interaction, action, name, values) {
     });
 }
 
+async function getEmbedDoc(guildId, name) {
+    return getDb().collection('embeds').findOne({ guildId, name });
+}
+
+function buildFieldSelectMenu(name, action, fields) {
+    const encodedName = encodeURIComponent(name);
+    const placeholder = action === 'field_edit_select' ? 'Select a field to edit' : 'Select a field to remove';
+    const options = fields.slice(0, LIMITS.fields).map((field, i) => ({
+        label: truncate(`${i + 1}. ${String(field.name ?? '').trim() || '(unnamed)'}`, 100),
+        description: truncate(`${field.inline ? 'Inline' : 'Not inline'} — ${String(field.value ?? '').trim() || '(empty)'}`, 100),
+        value: String(i),
+    }));
+
+    return new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+            .setCustomId(`embed:${action}:${encodedName}`)
+            .setPlaceholder(placeholder)
+            .addOptions(options)
+    );
+}
+
+async function showFieldsMenu(interaction, name) {
+    const encodedName = encodeURIComponent(name);
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`embed:field_add:${encodedName}`).setLabel('Add Field').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`embed:field_edit:${encodedName}`).setLabel('Edit Field').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`embed:field_remove:${encodedName}`).setLabel('Remove Field').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(`embed:field_list:${encodedName}`).setLabel('List Fields').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`embed:field_clear:${encodedName}`).setLabel('Clear All').setStyle(ButtonStyle.Danger),
+    );
+    await interaction.reply({
+        content: `Manage fields for **${name}** (max ${LIMITS.fields}). Edit/Remove use a dropdown of existing fields.`,
+        components: [row],
+        flags: MessageFlags.Ephemeral,
+    });
+}
+
 export async function handleEmbedButton(interaction) {
     const [system, action, ...rest] = interaction.customId.split(':');
     if (system !== 'embed') return false;
@@ -193,17 +270,130 @@ export async function handleEmbedButton(interaction) {
     const name = decodeName(rawName);
 
     try {
+        if (action === 'fields') {
+            await showFieldsMenu(interaction, name);
+            return true;
+        }
+
+        if (action === 'field_list') {
+            const guildId = interaction.guild?.id;
+            if (!guildId) {
+                await interaction.reply({ content: 'This can only be used in a server.', flags: MessageFlags.Ephemeral });
+                return true;
+            }
+            const embedDoc = await getEmbedDoc(guildId, name);
+            if (!embedDoc) {
+                await interaction.reply({ content: `Embed "${name}" was not found.`, flags: MessageFlags.Ephemeral });
+                return true;
+            }
+            const fields = Array.isArray(embedDoc.fields) ? embedDoc.fields : [];
+            if (fields.length === 0) {
+                await interaction.reply({ content: `**${name}** has no fields.`, flags: MessageFlags.Ephemeral });
+            } else {
+                const lines = fields.map((f, i) => `${i + 1}. **${String(f.name ?? '')}**${f.inline ? ' (inline)' : ''}: ${formatFieldValue(f.value)}`);
+                await interaction.reply({ content: `Fields for **${name}**:\n${lines.join('\n')}`.slice(0, 1900), flags: MessageFlags.Ephemeral });
+            }
+            return true;
+        }
+
+        if (action === 'field_clear') {
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+            await updateEmbed(interaction, 'field_clear', name, {});
+            await interaction.editReply(`Cleared all fields for **${name}**.`);
+            return true;
+        }
+
+        if (action === 'field_edit' || action === 'field_remove') {
+            const guildId = interaction.guild?.id;
+            if (!guildId) {
+                await interaction.reply({ content: 'This can only be used in a server.', flags: MessageFlags.Ephemeral });
+                return true;
+            }
+            const embedDoc = await getEmbedDoc(guildId, name);
+            if (!embedDoc) {
+                await interaction.reply({ content: `Embed "${name}" was not found.`, flags: MessageFlags.Ephemeral });
+                return true;
+            }
+            const fields = Array.isArray(embedDoc.fields) ? embedDoc.fields : [];
+            if (fields.length === 0) {
+                await interaction.reply({ content: `**${name}** has no fields to ${action === 'field_edit' ? 'edit' : 'remove'}.`, flags: MessageFlags.Ephemeral });
+                return true;
+            }
+            const selectAction = action === 'field_edit' ? 'field_edit_select' : 'field_remove_select';
+            await interaction.reply({
+                content: `Select a field to ${action === 'field_edit' ? 'edit' : 'remove'} for **${name}**:`,
+                components: [buildFieldSelectMenu(name, selectAction, fields)],
+                flags: MessageFlags.Ephemeral,
+            });
+            return true;
+        }
+
         if (modalActions[action]) {
             await modalBuild(interaction, action, name);
             return true;
         }
     } catch (error) {
-        console.error('Failed to open the embed editor modal:', error);
-        await reportModalError(interaction);
+        console.error('Failed to handle embed button:', error);
+        await reportModalError(interaction, error?.message || 'Could not handle that embed action.');
         return true;
     }
 
     // Unknown embed button action (may be added in later steps)
+    return false;
+}
+
+export async function handleEmbedSelectMenu(interaction) {
+    const [system, action, ...rest] = interaction.customId.split(':');
+    if (system !== 'embed') return false;
+
+    const rawName = rest.join(':');
+    const name = decodeName(rawName);
+    const selectedIndex = parseInt(interaction.values?.[0] ?? '', 10);
+
+    if (!Number.isInteger(selectedIndex) || selectedIndex < 0) return false;
+
+    try {
+        if (action === 'field_remove_select') {
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+            await updateEmbed(interaction, 'field_remove', name, { field_index: String(selectedIndex) });
+            await interaction.editReply(`Removed field #${selectedIndex + 1} from **${name}**.`);
+            return true;
+        }
+
+        if (action === 'field_edit_select') {
+            const guildId = interaction.guild?.id;
+            if (!guildId) {
+                await interaction.reply({ content: 'This can only be used in a server.', flags: MessageFlags.Ephemeral });
+                return true;
+            }
+            const embedDoc = await getEmbedDoc(guildId, name);
+            if (!embedDoc) {
+                await interaction.reply({ content: `Embed "${name}" was not found.`, flags: MessageFlags.Ephemeral });
+                return true;
+            }
+            const fields = Array.isArray(embedDoc.fields) ? embedDoc.fields : [];
+            const field = fields[selectedIndex];
+            if (!field) {
+                await interaction.reply({ content: `That field no longer exists in **${name}**.`, flags: MessageFlags.Ephemeral });
+                return true;
+            }
+
+            await modalBuild(interaction, 'field_edit', name, {
+                customIdSuffix: `:${selectedIndex}`,
+                initialValues: {
+                    field_name: String(field.name ?? ''),
+                    field_value: String(field.value ?? ''),
+                    field_inline: field.inline ? 'yes' : 'no',
+                },
+            });
+            return true;
+        }
+    } catch (error) {
+        console.error('Failed to handle embed select menu:', error);
+        await reportModalError(interaction, error?.message || 'Could not handle that embed action.');
+        return true;
+    }
+
     return false;
 }
 
@@ -238,8 +428,14 @@ export async function handleEmbedModal(interaction) {
         return true;
     }
 
-    const { action, name } = parsed;
+    const { action, name, index } = parsed;
     const { values, errors } = collectModalValues(action, interaction);
+    if (action === 'field_edit' && index !== null && index !== undefined) {
+        values.field_index = String(index);
+    }
+    if (action === 'field_edit' && (index === null || index === undefined)) {
+        errors.push('Could not determine which field to edit. Please select a field again.');
+    }
     if (errors.length) {
         await interaction.reply({ content: errors.join('\n'), flags: MessageFlags.Ephemeral });
         return true;
@@ -257,6 +453,8 @@ export async function handleEmbedModal(interaction) {
             thumbnail: 'thumbnail',
             image: 'image',
             timestamp: 'timestamp',
+            field_add: 'fields (added)',
+            field_edit: 'field (edited)',
         };
         await interaction.editReply(`Updated the ${labels[action] || action} for **${name}**.`);
     } catch (error) {

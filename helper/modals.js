@@ -170,26 +170,61 @@ const modalActions = {
             },
         ],
     },
+    field_add: {
+        title: 'Add Field',
+        customId: (name) => `embed_modal:field_add:${encodeURIComponent(name)}`,
+        inputs: [
+            { id: 'field_name', label: 'Field Name', style: TextInputStyle.Short, required: true, maxLength: LIMITS.fieldName },
+            { id: 'field_value', label: 'Field Value', style: TextInputStyle.Paragraph, required: true, maxLength: LIMITS.fieldValue },
+            { id: 'field_inline', label: 'Inline? (yes/no)', style: TextInputStyle.Short, required: false, maxLength: 5, placeholder: 'no' },
+        ],
+    },
+    field_edit: {
+        title: 'Edit Field',
+        customId: (name, suffix = '') => `embed_modal:field_edit:${encodeURIComponent(name)}${suffix}`,
+        inputs: [
+            { id: 'field_name', label: 'Field Name', style: TextInputStyle.Short, required: true, maxLength: LIMITS.fieldName },
+            { id: 'field_value', label: 'Field Value', style: TextInputStyle.Paragraph, required: true, maxLength: LIMITS.fieldValue },
+            { id: 'field_inline', label: 'Inline? (yes/no)', style: TextInputStyle.Short, required: false, maxLength: 5, placeholder: 'no' },
+        ],
+    },
 };
 
 // Back-compat export for existing consumers.
 const modalConfigs = modalActions;
 
 function parseModalCustomId(customId) {
-    const match = customId.match(/^embed_modal:(title|description|author|footer|color|thumbnail|image|timestamp):(.+)$/);
+    const match = customId.match(/^embed_modal:(title|description|author|footer|color|thumbnail|image|timestamp|field_add|field_edit):(.+)$/);
     if (!match) return null;
-    const [, action, rawName] = match;
-    let name = rawName;
-    try { name = decodeURIComponent(rawName); } catch { /* keep raw */ }
-    return { action, name };
+    const [, action, rawRest] = match;
+    let name = rawRest;
+    let index = null;
+
+    if (action === 'field_edit') {
+        // Format: embed_modal:field_edit:<encodedName>:<index>
+        const lastColon = rawRest.lastIndexOf(':');
+        if (lastColon !== -1) {
+            const maybeIndex = rawRest.slice(lastColon + 1);
+            if (/^\d+$/.test(maybeIndex)) {
+                index = parseInt(maybeIndex, 10);
+                name = rawRest.slice(0, lastColon);
+            }
+        }
+    }
+
+    try { name = decodeURIComponent(name); } catch { /* keep raw */ }
+    return { action, name, index };
 }
 
-async function modalBuild(interaction, type, name) {
+async function modalBuild(interaction, type, name, { initialValues = {}, customIdSuffix = '' } = {}) {
     const config = modalActions[type];
     if (!config) return;
 
+    const customId = config.customId
+        ? config.customId(name, customIdSuffix)
+        : `embed_modal:${type}:${encodeURIComponent(name)}${customIdSuffix}`;
     const modal = new ModalBuilder()
-        .setCustomId(config.customId ? config.customId(name) : `embed_modal:${type}:${encodeURIComponent(name)}`)
+        .setCustomId(customId)
         .setTitle(config.title);
 
     for (const def of config.inputs) {
@@ -200,8 +235,12 @@ async function modalBuild(interaction, type, name) {
 
         if (def.maxLength) input.setMaxLength(def.maxLength);
         if (def.placeholder) input.setPlaceholder(def.placeholder);
-        if (def.value !== undefined && def.value !== null && String(def.value) !== '') {
-            input.setValue(String(def.value));
+
+        const initial = Object.prototype.hasOwnProperty.call(initialValues, def.id)
+            ? initialValues[def.id]
+            : def.value;
+        if (initial !== undefined && initial !== null && String(initial) !== '') {
+            input.setValue(String(initial));
         }
 
         modal.addLabelComponents(new LabelBuilder({ label: def.label, component: input }));
