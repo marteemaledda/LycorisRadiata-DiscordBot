@@ -47,7 +47,8 @@ const modalActions = {
         title: 'Edit Description',
         customId: (name) => `embed_modal:description:${encodeURIComponent(name)}`,
         inputs: [
-            { id: 'description', label: 'Description', style: TextInputStyle.Paragraph, required: false, maxLength: LIMITS.description },
+            // Discord modal text inputs allow up to 4000 characters (embed descriptions allow up to 4096).
+            { id: 'description', label: 'Description', style: TextInputStyle.Paragraph, required: false, maxLength: 4000 },
         ],
     },
     author: {
