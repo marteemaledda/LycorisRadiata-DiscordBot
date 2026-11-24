@@ -1,10 +1,13 @@
-import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
-import { getDb } from '../../helper/db.js'
 import {
     ActionRowBuilder,
     ButtonBuilder,
-    ButtonStyle
+    ButtonStyle,
+    EmbedBuilder,
+    MessageFlags,
+    SlashCommandBuilder,
 } from "discord.js";
+import { getDb } from '../../helper/db.js';
+import { createDefaultEmbedData, createPreview } from '../../helper/embeds.js';
 
 // data 
 const data = new SlashCommandBuilder()
@@ -48,18 +51,8 @@ async function execute(interaction){
         });
     }
     
-    await embedsCollection.insertOne({
-        guildId: guildId,
-        name: name,
-        title: "No Title",
-        description: "No description yet.",
-        color: null,
-        footer: null,
-        thumbnail: null,
-        image: null,
-        previewChannelId: null,
-        previewMessageId: null
-    });
+    const embedDoc = createDefaultEmbedData(guildId, name);
+    await embedsCollection.insertOne(embedDoc);
     
     // row for buttons 
     const row = new ActionRowBuilder() // max 5 buttons per row
@@ -97,9 +90,7 @@ async function execute(interaction){
     );
 
     // builds base embed 
-    const preview = new EmbedBuilder()
-    .setTitle("No title")
-    .setDescription("No description yet.");
+    const preview = createPreview(embedDoc);
 
     // build embed msg 
     const response = await interaction.reply({
