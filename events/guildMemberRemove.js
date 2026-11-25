@@ -8,7 +8,7 @@ export default{
         // load channel id data
         const db = getDb();
         const settingsCollection = db.collection('settings');
-        const settings = settingsCollections.findOne({
+        const settings = settingsCollection.findOne({
             guildId: member.guild.id
         });
 
