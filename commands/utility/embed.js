@@ -1,10 +1,15 @@
-import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
-import { getDb } from '../../helper/db.js'
 import {
     ActionRowBuilder,
     ButtonBuilder,
-    ButtonStyle
+    ButtonStyle,
+    EmbedBuilder,
+    MessageFlags,
+    SlashCommandBuilder,
+    StringSelectMenuBuilder,
 } from "discord.js";
+import { getDb } from '../../helper/db.js';
+import { createDefaultEmbedData, createPreview } from '../../helper/embeds.js';
+import { deleteStoredEmbed } from '../../interactions/embed.js';
 
 // data 
 const data = new SlashCommandBuilder()
@@ -24,16 +29,85 @@ const data = new SlashCommandBuilder()
         )
     )
 
+    .addSubcommand(subcommand =>
+        subcommand
+        .setName('delete')
+        .setDescription('Deletes a saved embed for this server.')
+
+        .addStringOption(option=>
+            option
+            .setName('name')
+            .setDescription('Name of the embed to delete (leave blank to pick from a list).')
+            .setRequired(false)
+            .setAutocomplete(true)
+        )
+    )
+
 // function 
 async function execute(interaction){
     const subcommand = interaction.options.getSubcommand();
-    const guildId = interaction.guild.id;
+    const guildId = interaction.guild?.id;
     const name = interaction.options.getString('name');
+
+    if (!guildId) {
+        return interaction.reply({
+            content: 'This command can only be used in a server.',
+            flags: MessageFlags.Ephemeral,
+        });
+    }
 
     const db = getDb();
     const embedsCollection = db.collection('embeds');
 
+    if (subcommand === 'delete') {
+        if (!name) {
+            const embeds = await embedsCollection.find(
+                { guildId },
+                { projection: { name: 1 } }
+            ).sort({ name: 1 }).limit(26).toArray();
 
+            if (embeds.length === 0) {
+                return interaction.reply({
+                    content: 'No saved embeds found in this server.',
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+
+            if (embeds.length > 25) {
+                return interaction.reply({
+                    content: 'This server has more than 25 saved embeds. Please use `/embed delete name:<name>` (with autocomplete) to choose one.',
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+
+            const menu = new StringSelectMenuBuilder()
+                .setCustomId('embed:delete_select')
+                .setPlaceholder('Select an embed to delete')
+                .addOptions(embeds.map((e) => ({
+                    label: String(e.name ?? '').slice(0, 100) || '(unnamed)',
+                    value: String(e.name ?? '').slice(0, 100),
+                })));
+
+            return interaction.reply({
+                content: 'Select an embed to delete from this server:',
+                components: [new ActionRowBuilder().addComponents(menu)],
+                flags: MessageFlags.Ephemeral,
+            });
+        }
+
+        const result = await deleteStoredEmbed(interaction.guild, name);
+        if (!result.found) {
+            return interaction.reply({
+                content: `Embed "${name}" was not found in this server.`,
+                flags: MessageFlags.Ephemeral,
+            });
+        }
+
+        return interaction.reply({
+            content: `Deleted embed **${name}** from this server.`,
+            flags: MessageFlags.Ephemeral,
+        });
+    }
 
     // create an embed 
     const embed = await embedsCollection.findOne({
@@ -48,58 +122,57 @@ async function execute(interaction){
         });
     }
     
-    await embedsCollection.insertOne({
-        guildId: guildId,
-        name: name,
-        title: "No Title",
-        description: "No description yet.",
-        color: null,
-        footer: null,
-        thumbnail: null,
-        image: null,
-        previewChannelId: null,
-        previewMessageId: null
-    });
+    const embedDoc = createDefaultEmbedData(guildId, name);
+    await embedsCollection.insertOne(embedDoc);
     
-    // row for buttons 
+    // row for buttons (all non-field options; URL-based image/icon controls included)
+    const encodedName = encodeURIComponent(name);
     const row = new ActionRowBuilder() // max 5 buttons per row
     .addComponents(
-        // BUTTON CREATION
         new ButtonBuilder()
-            .setCustomId(`embed:title:${name}`)
-            .setLabel('Title')
+            .setCustomId(`embed:title:${encodedName}`)
+            .setLabel('Title & URL')
             .setStyle(ButtonStyle.Secondary),
-
         new ButtonBuilder()
-            .setCustomId(`embed:description:${name}`)
+            .setCustomId(`embed:description:${encodedName}`)
             .setLabel('Description')
             .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
-            .setCustomId(`embed:color:${name}`)
-            .setLabel('Color')
+            .setCustomId(`embed:author:${encodedName}`)
+            .setLabel('Author')
             .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
-            .setCustomId(`embed:footer:${name}`)
+            .setCustomId(`embed:footer:${encodedName}`)
             .setLabel('Footer')
             .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
-            .setCustomId(`embed:thumbnail:${name}`)
-            .setLabel('Thumbnail')
+            .setCustomId(`embed:color:${encodedName}`)
+            .setLabel('Color')
             .setStyle(ButtonStyle.Secondary),
     );
 
     const row2 = new ActionRowBuilder()
     .addComponents(
-         new ButtonBuilder()
-            .setCustomId(`embed:image:${name}`)
+        new ButtonBuilder()
+            .setCustomId(`embed:thumbnail:${encodedName}`)
+            .setLabel('Thumbnail')
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId(`embed:image:${encodedName}`)
             .setLabel('Image')
-            .setStyle(ButtonStyle.Secondary)
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId(`embed:timestamp:${encodedName}`)
+            .setLabel('Timestamp')
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId(`embed:fields:${encodedName}`)
+            .setLabel('Fields')
+            .setStyle(ButtonStyle.Secondary),
     );
 
     // builds base embed 
-    const preview = new EmbedBuilder()
-    .setTitle("No title")
-    .setDescription("No description yet.");
+    const preview = createPreview(embedDoc);
 
     // build embed msg 
     const response = await interaction.reply({
@@ -125,7 +198,39 @@ async function execute(interaction){
 
 }
 
+async function autocomplete(interaction) {
+    if (interaction.options.getSubcommand() !== 'delete') {
+        return interaction.respond([]);
+    }
+
+    const guildId = interaction.guild?.id;
+    if (!guildId) {
+        return interaction.respond([]);
+    }
+
+    const focused = String(interaction.options.getFocused() ?? '').toLowerCase();
+    const db = getDb();
+    const embedsCollection = db.collection('embeds');
+
+    const query = { guildId };
+    if (focused) {
+        query.name = { $regex: focused.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
+    }
+
+    const embeds = await embedsCollection.find(query, { projection: { name: 1 } })
+        .sort({ name: 1 })
+        .limit(25)
+        .toArray();
+
+    await interaction.respond(
+        embeds
+            .filter((e) => e?.name)
+            .map((e) => ({ name: String(e.name).slice(0, 100), value: String(e.name).slice(0, 100) }))
+    );
+}
+
 export default{
     data,
-    execute
+    execute,
+    autocomplete,
 };

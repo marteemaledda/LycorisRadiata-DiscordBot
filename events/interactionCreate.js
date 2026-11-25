@@ -2,7 +2,7 @@ import {
 	Events,
 	MessageFlags,
 } from 'discord.js';
-import { handleEmbedButton, handleEmbedModal } from '../interactions/embed.js';
+import { handleEmbedButton, handleEmbedModal, handleEmbedSelectMenu } from '../interactions/embed.js';
 
 export default {
 	name: Events.InteractionCreate,
@@ -15,11 +15,31 @@ export default {
 			}
 		}
 
+		if (interaction.isStringSelectMenu()) {
+			if (await handleEmbedSelectMenu(interaction)) {
+				return;
+			}
+		}
+
 		// Route modal submissions by their custom ID; other feature modals can add handlers here.
 		if (interaction.isModalSubmit()) {
 			if (await handleEmbedModal(interaction)) {
 				return;
 			}
+		}
+
+		if (interaction.isAutocomplete()) {
+			const command = interaction.client.commands.get(interaction.commandName);
+			if (!command || typeof command.autocomplete !== 'function') {
+				return;
+			}
+
+			try {
+				await command.autocomplete(interaction);
+			} catch (error) {
+				console.error(error);
+			}
+			return;
 		}
 
 		if (!interaction.isChatInputCommand()) {
