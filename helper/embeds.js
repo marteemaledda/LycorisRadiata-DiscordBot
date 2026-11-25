@@ -141,25 +141,25 @@ function createPreview(data = {}) {
     const embed = new EmbedBuilder();
 
     if (d.title) embed.setTitle(d.title);
-    if (d.url) embed.setURL(d.url);
+    if (isValidHttpUrl(d.url)) embed.setURL(d.url);
     if (d.description) embed.setDescription(d.description);
     if (d.color) embed.setColor(d.color);
 
     if (d.author?.name) {
         const author = { name: d.author.name };
-        if (d.author.url) author.url = d.author.url;
-        if (d.author.iconURL) author.iconURL = d.author.iconURL;
+        if (isValidHttpUrl(d.author.url)) author.url = d.author.url;
+        if (isValidHttpUrl(d.author.iconURL)) author.iconURL = d.author.iconURL;
         embed.setAuthor(author);
     }
 
     if (d.footer?.text) {
         const footer = { text: d.footer.text };
-        if (d.footer.iconURL) footer.iconURL = d.footer.iconURL;
+        if (isValidHttpUrl(d.footer.iconURL)) footer.iconURL = d.footer.iconURL;
         embed.setFooter(footer);
     }
 
-    if (d.thumbnail?.url) embed.setThumbnail(d.thumbnail.url);
-    if (d.image?.url) embed.setImage(d.image.url);
+    if (isValidHttpUrl(d.thumbnail?.url)) embed.setThumbnail(d.thumbnail.url);
+    if (isValidHttpUrl(d.image?.url)) embed.setImage(d.image.url);
 
     if (d.timestamp) {
         const date = new Date(d.timestamp);
@@ -197,6 +197,127 @@ function createDefaultEmbedData(guildId, name) {
     };
 }
 
+function replaceEmbedPlaceholders(value, context) {
+    if (typeof value !== "string" || value.length === 0) return value;
+
+    return value.replace(/\{(mention|user|username|displayname|globalname|tag|id|avatar|useravatar|serveravatar|guild|server|guildid|serverid|membercount)\}/gi, (match, key) => {
+        const k = String(key).toLowerCase();
+        switch (k) {
+            case "mention":
+            case "user":
+                return context.mention;
+            case "username":
+                return context.username;
+            case "displayname":
+                return context.displayName;
+            case "globalname":
+                return context.globalName;
+            case "tag":
+                return context.tag;
+            case "id":
+                return context.id;
+            case "avatar":
+            case "useravatar":
+                return context.avatar;
+            case "serveravatar":
+                return context.serverAvatar;
+            case "guild":
+            case "server":
+                return context.guildName;
+            case "guildid":
+            case "serverid":
+                return context.guildId;
+            case "membercount":
+                return context.memberCount;
+            default:
+                return match;
+        }
+    });
+}
+
+function buildWelcomeContext(member) {
+    const user = member.user;
+    return {
+        mention: `<@${member.id}>`,
+        username: user?.username ?? "",
+        displayName: member.displayName ?? user?.globalName ?? user?.username ?? "",
+        globalName: user?.globalName ?? user?.username ?? "",
+        tag: user?.tag ?? user?.username ?? "",
+        id: member.id ?? "",
+        avatar: typeof user?.displayAvatarURL === "function" ? user.displayAvatarURL({ size: 256 }) : "",
+        serverAvatar: typeof member.displayAvatarURL === "function" ? member.displayAvatarURL({ size: 256 }) : "",
+        guildName: member.guild?.name ?? "",
+        guildId: member.guild?.id ?? "",
+        memberCount: String(member.guild?.memberCount ?? ""),
+    };
+}
+
+function isValidHttpUrl(value) {
+    if (typeof value !== "string") return false;
+    try {
+        const url = new URL(value.trim());
+        return url.protocol === "http:" || url.protocol === "https:";
+    } catch {
+        return false;
+    }
+}
+
+function sanitizeEmbedUrl(value) {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    return isValidHttpUrl(trimmed) ? trimmed : null;
+}
+
+function renderWelcomeEmbedData(data = {}, member) {
+    const d = normalizeEmbedData(data);
+    const context = buildWelcomeContext(member);
+    const mapText = (value) => replaceEmbedPlaceholders(value, context);
+
+    const rendered = {
+        ...d,
+        title: mapText(d.title ?? ""),
+        url: sanitizeEmbedUrl(mapText(d.url ?? "")),
+        description: mapText(d.description ?? ""),
+        author: d.author
+            ? {
+                name: mapText(d.author.name ?? ""),
+                url: sanitizeEmbedUrl(mapText(d.author.url ?? "")),
+                iconURL: sanitizeEmbedUrl(mapText(d.author.iconURL ?? "")),
+            }
+            : null,
+        footer: d.footer
+            ? {
+                text: mapText(d.footer.text ?? ""),
+                iconURL: sanitizeEmbedUrl(mapText(d.footer.iconURL ?? "")),
+            }
+            : null,
+        thumbnail: sanitizeEmbedUrl(mapText(d.thumbnail?.url ?? "")) ? { url: sanitizeEmbedUrl(mapText(d.thumbnail?.url ?? "")) } : null,
+        image: sanitizeEmbedUrl(mapText(d.image?.url ?? "")) ? { url: sanitizeEmbedUrl(mapText(d.image?.url ?? "")) } : null,
+        fields: Array.isArray(d.fields)
+            ? d.fields.map((f) => ({
+                name: mapText(f?.name ?? ""),
+                value: mapText(f?.value ?? ""),
+                inline: Boolean(f?.inline),
+            }))
+            : [],
+    };
+
+    // If a timestamp is configured on the template, use the current (join) time for welcome messages.
+    if (d.timestamp) {
+        rendered.timestamp = new Date().toISOString();
+    }
+
+    // Drop empty author/footer objects after placeholder replacement.
+    if (rendered.author && !String(rendered.author.name ?? "").trim()) {
+        rendered.author = null;
+    }
+    if (rendered.footer && !String(rendered.footer.text ?? "").trim() && !rendered.footer.iconURL) {
+        rendered.footer = null;
+    }
+
+    return rendered;
+}
+
 export {
     LIMITS,
     normalizeEmbedData,
@@ -205,4 +326,5 @@ export {
     hasAnyContent,
     createPreview,
     createDefaultEmbedData,
+    renderWelcomeEmbedData,
 };

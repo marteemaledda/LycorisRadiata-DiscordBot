@@ -17,6 +17,13 @@ function isValidHttpUrl(value) {
     }
 }
 
+function isValidUrlOrPlaceholder(value) {
+    const v = value.trim();
+    if (v === '') return true;
+    if (isValidHttpUrl(v)) return true;
+    return /\{[a-z0-9_]+\}/i.test(v);
+}
+
 function normalizeColor(value) {
     const v = value.trim();
     if (/^#[\da-fA-F]{6}$/.test(v)) return v.toUpperCase();
@@ -38,9 +45,9 @@ const modalActions = {
                 style: TextInputStyle.Short,
                 required: false,
                 maxLength: 2048,
-                placeholder: 'https://example.com',
-                validate: (v) => v.trim() === '' || isValidHttpUrl(v),
-                invalidMessage: 'Title URL must be a valid http(s) URL.',
+                placeholder: 'https://example.com or {avatar}',
+                validate: (v) => isValidUrlOrPlaceholder(v),
+                invalidMessage: 'Title URL must be a valid http(s) URL or a placeholder (e.g. {avatar}).',
             },
         ],
     },
@@ -64,8 +71,8 @@ const modalActions = {
                 required: false,
                 maxLength: 2048,
                 placeholder: 'https://example.com',
-                validate: (v) => v.trim() === '' || isValidHttpUrl(v),
-                invalidMessage: 'Author URL must be a valid http(s) URL.',
+                validate: (v) => isValidUrlOrPlaceholder(v),
+                invalidMessage: 'Author URL must be a valid http(s) URL or a placeholder (e.g. {avatar}).',
             },
             {
                 id: 'author_icon',
@@ -73,9 +80,9 @@ const modalActions = {
                 style: TextInputStyle.Short,
                 required: false,
                 maxLength: 2048,
-                placeholder: 'https://example.com/icon.png',
-                validate: (v) => v.trim() === '' || isValidHttpUrl(v),
-                invalidMessage: 'Author icon URL must be a valid http(s) URL.',
+                placeholder: 'https://example.com/icon.png or {avatar}',
+                validate: (v) => isValidUrlOrPlaceholder(v),
+                invalidMessage: 'Author icon URL must be a valid http(s) URL or a placeholder (e.g. {avatar}).',
             },
             { id: 'author_icon_file', label: 'Author Icon File (optional)', kind: 'file', required: false },
         ],
@@ -91,9 +98,9 @@ const modalActions = {
                 style: TextInputStyle.Short,
                 required: false,
                 maxLength: 2048,
-                placeholder: 'https://example.com/icon.png',
-                validate: (v) => v.trim() === '' || isValidHttpUrl(v),
-                invalidMessage: 'Footer icon URL must be a valid http(s) URL.',
+                placeholder: 'https://example.com/icon.png or {avatar}',
+                validate: (v) => isValidUrlOrPlaceholder(v),
+                invalidMessage: 'Footer icon URL must be a valid http(s) URL or a placeholder (e.g. {avatar}).',
             },
             { id: 'footer_icon_file', label: 'Footer Icon File (optional)', kind: 'file', required: false },
         ],
@@ -125,9 +132,9 @@ const modalActions = {
                 style: TextInputStyle.Short,
                 required: false,
                 maxLength: 2048,
-                placeholder: 'https://example.com/thumb.png',
-                validate: (v) => v.trim() === '' || isValidHttpUrl(v),
-                invalidMessage: 'Thumbnail URL must be a valid http(s) URL.',
+                placeholder: 'https://example.com/thumb.png or {avatar}',
+                validate: (v) => isValidUrlOrPlaceholder(v),
+                invalidMessage: 'Thumbnail URL must be a valid http(s) URL or a placeholder (e.g. {avatar}).',
             },
             { id: 'thumbnail_file', label: 'Thumbnail File (optional)', kind: 'file', required: false },
         ],
@@ -142,9 +149,9 @@ const modalActions = {
                 style: TextInputStyle.Short,
                 required: false,
                 maxLength: 2048,
-                placeholder: 'https://example.com/image.png',
-                validate: (v) => v.trim() === '' || isValidHttpUrl(v),
-                invalidMessage: 'Image URL must be a valid http(s) URL.',
+                placeholder: 'https://example.com/image.png or {avatar}',
+                validate: (v) => isValidUrlOrPlaceholder(v),
+                invalidMessage: 'Image URL must be a valid http(s) URL or a placeholder (e.g. {avatar}).',
             },
             { id: 'image_file', label: 'Main Image File (optional)', kind: 'file', required: false },
         ],

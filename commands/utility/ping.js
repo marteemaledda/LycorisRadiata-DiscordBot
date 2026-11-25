@@ -9,7 +9,7 @@ const data = new SlashCommandBuilder()
 async function execute(interaction) {
 	const sent = await interaction.reply({
 		content: 'Pinging...',
-		fetchReply: true,
+		withResponse: true,
 	});
 
 	const latency = sent.createdTimestamp - interaction.createdTimestamp;

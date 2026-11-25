@@ -382,7 +382,54 @@ export async function handleEmbedButton(interaction) {
         }
 
         if (modalActions[action]) {
-            await modalBuild(interaction, action, name);
+            let initialValues = {};
+
+            if (action !== 'field_add') {
+                const guildId = interaction.guild?.id;
+                if (!guildId) {
+                    await interaction.reply({ content: 'This can only be used in a server.', flags: MessageFlags.Ephemeral });
+                    return true;
+                }
+
+                const embedDoc = await getEmbedDoc(guildId, name);
+                if (!embedDoc) {
+                    await interaction.reply({ content: `Embed "${name}" was not found.`, flags: MessageFlags.Ephemeral });
+                    return true;
+                }
+
+                if (action === 'title') {
+                    initialValues = {
+                        title: embedDoc.title ?? '',
+                        url: embedDoc.url ?? '',
+                    };
+                } else if (action === 'description') {
+                    const description = String(embedDoc.description ?? '');
+                    initialValues = {
+                        description: description.length > 4000 ? description.slice(0, 4000) : description,
+                    };
+                } else if (action === 'author') {
+                    initialValues = {
+                        author_name: embedDoc.author?.name ?? '',
+                        author_url: embedDoc.author?.url ?? '',
+                        author_icon: embedDoc.author?.iconURL ?? '',
+                    };
+                } else if (action === 'footer') {
+                    initialValues = {
+                        footer_text: embedDoc.footer?.text ?? '',
+                        footer_icon: embedDoc.footer?.iconURL ?? '',
+                    };
+                } else if (action === 'color') {
+                    initialValues = { color: embedDoc.color ?? '' };
+                } else if (action === 'thumbnail') {
+                    initialValues = { thumbnail: embedDoc.thumbnail?.url ?? '' };
+                } else if (action === 'image') {
+                    initialValues = { image: embedDoc.image?.url ?? '' };
+                } else if (action === 'timestamp') {
+                    initialValues = { timestamp: embedDoc.timestamp ?? '' };
+                }
+            }
+
+            await modalBuild(interaction, action, name, { initialValues });
             return true;
         }
     } catch (error) {

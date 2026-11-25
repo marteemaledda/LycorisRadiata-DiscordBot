@@ -11,6 +11,55 @@ import { getDb } from '../../helper/db.js';
 import { createDefaultEmbedData, createPreview } from '../../helper/embeds.js';
 import { deleteStoredEmbed } from '../../interactions/embed.js';
 
+function buildEmbedEditorComponents(name) {
+    const encodedName = encodeURIComponent(name);
+    const row = new ActionRowBuilder()
+        .addComponents(
+            new ButtonBuilder()
+                .setCustomId(`embed:title:${encodedName}`)
+                .setLabel('Title & URL')
+                .setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder()
+                .setCustomId(`embed:description:${encodedName}`)
+                .setLabel('Description')
+                .setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder()
+                .setCustomId(`embed:author:${encodedName}`)
+                .setLabel('Author')
+                .setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder()
+                .setCustomId(`embed:footer:${encodedName}`)
+                .setLabel('Footer')
+                .setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder()
+                .setCustomId(`embed:color:${encodedName}`)
+                .setLabel('Color')
+                .setStyle(ButtonStyle.Secondary),
+        );
+
+    const row2 = new ActionRowBuilder()
+        .addComponents(
+            new ButtonBuilder()
+                .setCustomId(`embed:thumbnail:${encodedName}`)
+                .setLabel('Thumbnail')
+                .setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder()
+                .setCustomId(`embed:image:${encodedName}`)
+                .setLabel('Image')
+                .setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder()
+                .setCustomId(`embed:timestamp:${encodedName}`)
+                .setLabel('Timestamp')
+                .setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder()
+                .setCustomId(`embed:fields:${encodedName}`)
+                .setLabel('Fields')
+                .setStyle(ButtonStyle.Secondary),
+        );
+
+    return [row, row2];
+}
+
 // data 
 const data = new SlashCommandBuilder()
     .setName('embed')
@@ -26,6 +75,20 @@ const data = new SlashCommandBuilder()
             .setName('name')
             .setDescription('Sets name of embed.')
             .setRequired(true)
+        )
+    )
+
+    .addSubcommand(subcommand =>
+        subcommand
+        .setName('edit')
+        .setDescription('Edits a saved embed and shows a preview.')
+
+        .addStringOption(option=>
+            option
+            .setName('name')
+            .setDescription('Name of the embed to edit.')
+            .setRequired(true)
+            .setAutocomplete(true)
         )
     )
 
@@ -109,97 +172,84 @@ async function execute(interaction){
         });
     }
 
-    // create an embed 
-    const embed = await embedsCollection.findOne({
-        guildId: guildId,
-        name: name
-    });
-
-    if (embed){
-        return await interaction.reply({
-            content: `Embed has already been created.`,
-            flags: MessageFlags.Ephemeral
-        });
-    }
-    
-    const embedDoc = createDefaultEmbedData(guildId, name);
-    await embedsCollection.insertOne(embedDoc);
-    
-    // row for buttons (all non-field options; URL-based image/icon controls included)
-    const encodedName = encodeURIComponent(name);
-    const row = new ActionRowBuilder() // max 5 buttons per row
-    .addComponents(
-        new ButtonBuilder()
-            .setCustomId(`embed:title:${encodedName}`)
-            .setLabel('Title & URL')
-            .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-            .setCustomId(`embed:description:${encodedName}`)
-            .setLabel('Description')
-            .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-            .setCustomId(`embed:author:${encodedName}`)
-            .setLabel('Author')
-            .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-            .setCustomId(`embed:footer:${encodedName}`)
-            .setLabel('Footer')
-            .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-            .setCustomId(`embed:color:${encodedName}`)
-            .setLabel('Color')
-            .setStyle(ButtonStyle.Secondary),
-    );
-
-    const row2 = new ActionRowBuilder()
-    .addComponents(
-        new ButtonBuilder()
-            .setCustomId(`embed:thumbnail:${encodedName}`)
-            .setLabel('Thumbnail')
-            .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-            .setCustomId(`embed:image:${encodedName}`)
-            .setLabel('Image')
-            .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-            .setCustomId(`embed:timestamp:${encodedName}`)
-            .setLabel('Timestamp')
-            .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-            .setCustomId(`embed:fields:${encodedName}`)
-            .setLabel('Fields')
-            .setStyle(ButtonStyle.Secondary),
-    );
-
-    // builds base embed 
-    const preview = createPreview(embedDoc);
-
-    // build embed msg 
-    const response = await interaction.reply({
-        embeds: [preview],
-        components: [row, row2],
-        withResponse: true
-    });
-
-    const message = response.resource.message;
-
-    await embedsCollection.updateOne(
-    {
-        guildId: guildId,
-        name: name
-    },
-    {
-        $set: {
-            previewChannelId: interaction.channel.id,
-            previewMessageId: message.id
+    if (subcommand === 'edit') {
+        const embedDoc = await embedsCollection.findOne({ guildId, name });
+        if (!embedDoc) {
+            return interaction.reply({
+                content: `Embed "${name}" was not found in this server.`,
+                flags: MessageFlags.Ephemeral,
+            });
         }
+
+        const preview = createPreview(embedDoc);
+        const components = buildEmbedEditorComponents(name);
+
+        const response = await interaction.reply({
+            embeds: [preview],
+            components,
+            withResponse: true,
+        });
+
+        const message = response.resource.message;
+        await embedsCollection.updateOne(
+            { guildId, name },
+            {
+                $set: {
+                    previewChannelId: interaction.channel.id,
+                    previewMessageId: message.id,
+                },
+            }
+        );
+
+        return;
     }
-    );
+
+    if (subcommand === 'create') {
+        const embed = await embedsCollection.findOne({
+            guildId: guildId,
+            name: name
+        });
+
+        if (embed){
+            return await interaction.reply({
+                content: `Embed has already been created.`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        const embedDoc = createDefaultEmbedData(guildId, name);
+        await embedsCollection.insertOne(embedDoc);
+
+        const preview = createPreview(embedDoc);
+        const components = buildEmbedEditorComponents(name);
+
+        const response = await interaction.reply({
+            embeds: [preview],
+            components,
+            withResponse: true
+        });
+
+        const message = response.resource.message;
+
+        await embedsCollection.updateOne(
+            {
+                guildId: guildId,
+                name: name
+            },
+            {
+                $set: {
+                    previewChannelId: interaction.channel.id,
+                    previewMessageId: message.id
+                }
+            }
+        );
+    }
 
 }
 
 async function autocomplete(interaction) {
-    if (interaction.options.getSubcommand() !== 'delete') {
+    const subcommand = interaction.options.getSubcommand();
+    if (subcommand !== 'delete' && subcommand !== 'edit') {
         return interaction.respond([]);
     }
 
